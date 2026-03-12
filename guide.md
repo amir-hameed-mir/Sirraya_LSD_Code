@@ -10,10 +10,19 @@
 
 Imagine you're reading a book, and with each page, your understanding of the story evolves. Similarly, when a Large Language Model (LLM) processes text, its "understanding" evolves as the information flows through its neural network layers. **Layer-wise Semantic Dynamics** is the study of how this understanding changes from the input layer to the output layer.
 
-Think of it this way:
-- **Layer 1**: The model sees raw words (like seeing individual letters on a page)
-- **Middle Layers**: The model starts forming concepts (like understanding words form sentences)
-- **Final Layers**: The model has full semantic understanding (like comprehending the complete story)
+```mermaid
+graph LR
+    subgraph "Information Flow Through Layers"
+        A[Input Text] --> B[Layer 1<br/>Word Level]
+        B --> C[Layer 2<br/>Syntax Level]
+        C --> D[Layer 3<br/>Concept Level]
+        D --> E[Layer 4<br/>Semantic Level]
+        E --> F[Layer 5<br/>Output]
+    end
+    
+    style A fill:#f9f,stroke:#333,stroke-width:2px
+    style F fill:#9ff,stroke:#333,stroke-width:2px
+```
 
 ### 1.2 Why Does This Matter for Hallucination Detection?
 
@@ -21,1585 +30,1690 @@ Think of it this way:
 - **Correct**: "The Eiffel Tower is in Paris, France"
 - **Hallucination**: "The Eiffel Tower is in Rome, Italy"
 
-The key insight of Layer-wise Semantic Dynamics is that **truthful and hallucinated information follow different "paths"** through the neural network layers. By analyzing these paths (trajectories), we can detect when the model is hallucinating.
+```mermaid
+graph TD
+    subgraph "Hallucination Detection Concept"
+        H[Input: Question] --> M[LLM Processing]
+        M --> T[Truthful Path<br/>Stable trajectory]
+        M --> F[False Path<br/>Unstable trajectory]
+        
+        T --> D{Detector}
+        F --> D
+        
+        D --> O1[Accept: Factual]
+        D --> O2[Reject: Hallucination]
+    end
+    
+    style T stroke:#0f0,stroke-width:2px
+    style F stroke:#f00,stroke-width:2px
+    style D stroke:#00f,stroke-width:2px
+```
 
 ### 1.3 The Core Idea in Simple Terms
 
+```mermaid
+graph TD
+    subgraph "Factual Statement Trajectory"
+        F1[Layer 1<br/>0.2] --> F2[Layer 2<br/>0.4]
+        F2 --> F3[Layer 3<br/>0.7]
+        F3 --> F4[Layer 4<br/>0.9]
+        F4 --> F5[Layer 5<br/>0.95]
+    end
+    
+    subgraph "Hallucination Trajectory"
+        H1[Layer 1<br/>0.3] --> H2[Layer 2<br/>0.6]
+        H2 --> H3[Layer 3<br/>0.4]
+        H3 --> H4[Layer 4<br/>0.8]
+        H4 --> H5[Layer 5<br/>0.2]
+    end
+    
+    style F1 fill:#cfc,stroke:#0f0
+    style F5 fill:#cfc,stroke:#0f0
+    style H1 fill:#fcc,stroke:#f00
+    style H5 fill:#fcc,stroke:#f00
 ```
-INPUT: "The Eiffel Tower is in ___"
-       ↓
-LAYER 1: [Raw word embeddings]
-       ↓
-LAYER 2: [Basic syntax understood]
-       ↓
-LAYER 3: [Concepts forming]
-       ↓
-LAYER 4: [Semantic understanding]
-       ↓
-LAYER 5: [Final prediction]
-       ↓
-OUTPUT: "Paris" (factual) OR "Rome" (hallucination)
-```
-
-**What we discovered**: Factual information tends to converge to a stable representation early, while hallucinations show unstable, oscillating patterns through the layers.
 
 ---
 
-# PART 2: THE ARCHITECTURE - Building Block by Block
+# PART 2: SYSTEM ARCHITECTURE
 
-## 2.1 System Overview
+## 2.1 High-Level Architecture
 
-Our system consists of several interconnected components:
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                 DATA LAYER                               │
-│  ┌────────────┐  ┌────────────┐  ┌────────────┐        │
-│  │ Synthetic  │  │ TruthfulQA │  │ Custom     │        │
-│  │ Data       │  │ Dataset    │  │ Datasets   │        │
-│  └────────────┘  └────────────┘  └────────────┘        │
-└─────────────────────────────────────────────────────────┘
-                           ↓
-┌─────────────────────────────────────────────────────────┐
-│                 MODEL LAYER                              │
-│  ┌────────────────────┐  ┌────────────────────┐        │
-│  │ LLM (GPT-2, etc.)  │  │ Truth Encoder      │        │
-│  │ Extracts hidden    │  │ (Sentence-BERT)    │        │
-│  │ states from all    │  │ Encodes truth      │        │
-│  │ layers             │  │ statements         │        │
-│  └────────────────────┘  └────────────────────┘        │
-└─────────────────────────────────────────────────────────┘
-                           ↓
-┌─────────────────────────────────────────────────────────┐
-│              PROJECTION LAYER                            │
-│  ┌────────────────────────────────────┐                 │
-│  │ Neural Networks that project both   │                 │
-│  │ embeddings into a SHARED SPACE      │                 │
-│  │ where we can compare them           │                 │
-│  └────────────────────────────────────┘                 │
-└─────────────────────────────────────────────────────────┘
-                           ↓
-┌─────────────────────────────────────────────────────────┐
-│              ANALYSIS LAYER                              │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐             │
-│  │Feature   │  │Statistical│  │Visual-   │             │
-│  │Extraction│  │Analysis   │  │ization   │             │
-│  └──────────┘  └──────────┘  └──────────┘             │
-└─────────────────────────────────────────────────────────┘
-```
-
-## 2.2 Understanding Embeddings and Hidden States
-
-### What is an Embedding?
-An **embedding** is a numerical representation of text - essentially converting words into numbers that computers can process.
-
-Think of it like this:
-- **Word**: "cat"
-- **Embedding**: [0.2, -0.5, 0.8, 0.1, ...] (a vector of numbers)
-
-Each number captures some aspect of meaning:
-- First dimension might represent "animal-ness"
-- Second might represent "size"
-- Third might represent "domestic vs wild"
-
-### Hidden States Through Layers
-
-When text passes through each layer of a neural network, its embedding transforms:
-
-```
-Layer 1: [0.2, -0.5, 0.8, 0.1] → Basic word meaning
-Layer 2: [0.3, -0.4, 0.7, 0.2] → Syntax understood
-Layer 3: [0.5, -0.3, 0.6, 0.3] → Context incorporated
-Layer 4: [0.7, -0.2, 0.5, 0.4] → Semantic understanding
+```mermaid
+graph TB
+    subgraph "Data Layer"
+        DS[Dataset Sources]
+        DM[Data Manager]
+        DP[Data Preprocessor]
+    end
+    
+    subgraph "Model Layer"
+        HE[Hidden States Extractor]
+        TE[Truth Encoder]
+        PH[Projection Heads]
+    end
+    
+    subgraph "Training Layer"
+        CL[Contrastive Learning]
+        OP[Optimizer]
+        SC[Scheduler]
+    end
+    
+    subgraph "Analysis Layer"
+        FE[Feature Extractor]
+        SA[Statistical Analyzer]
+        EV[Evaluator]
+    end
+    
+    subgraph "Visualization Layer"
+        VI[Visualization Engine]
+        RP[Report Generator]
+    end
+    
+    DS --> DM --> DP
+    DP --> HE
+    DP --> TE
+    HE --> PH
+    TE --> PH
+    PH --> CL
+    CL --> OP --> SC
+    PH --> FE
+    FE --> SA --> EV
+    EV --> VI --> RP
+    
+    style DS fill:#f9f,stroke:#333
+    style HE fill:#9ff,stroke:#333
+    style PH fill:#ff9,stroke:#333
+    style EV fill:#9f9,stroke:#333
+    style RP fill:#f96,stroke:#333
 ```
 
-## 2.3 The Shared Space Concept
+## 2.2 Class Diagram
 
-The key innovation: we project both the LLM's hidden states AND truth embeddings into a **shared space** where we can directly compare them.
-
+```mermaid
+classDiagram
+    class LayerwiseSemanticDynamicsConfig {
+        +str model_name
+        +str truth_encoder_name
+        +int shared_dim
+        +int max_length
+        +int batch_size
+        +int epochs
+        +float learning_rate
+        +float margin
+        +OperationMode mode
+        +__post_init__()
+    }
+    
+    class DirectoryManager {
+        -Path base_dir
+        -Path models_dir
+        -Path plots_dir
+        -Path results_dir
+        +get_model_path()
+        +get_plot_path()
+        +get_result_path()
+    }
+    
+    class HiddenStatesExtractor {
+        -model
+        -tokenizer
+        -dict _cache
+        +get_hidden_states()
+        +clear_cache()
+    }
+    
+    class TruthEncoder {
+        -model
+        -dict _cache
+        +encode_batch()
+        +clear_cache()
+    }
+    
+    class ProjectionHead {
+        -nn.Sequential layers
+        +forward()
+    }
+    
+    class ModelManager {
+        -HiddenStatesExtractor extractor
+        -TruthEncoder truth_encoder
+        -ProjectionHead hidden_proj
+        -ProjectionHead truth_proj
+        +initialize_models()
+        +load_pretrained()
+        +save_models()
+    }
+    
+    class DataManager {
+        -LayerwiseSemanticDynamicsConfig config
+        +build_dataset()
+        +load_truthfulqa()
+        -_load_synthetic_pairs()
+    }
+    
+    class FeatureExtractor {
+        -ModelManager model_manager
+        +extract_trajectory_features()
+        -_compute_trajectory_metrics()
+    }
+    
+    class ComprehensiveEvaluator {
+        -LayerwiseSemanticDynamicsConfig config
+        +evaluate_supervised()
+        +evaluate_unsupervised()
+        +evaluate_hybrid()
+        -_compute_comprehensive_metrics()
+    }
+    
+    class VisualizationEngine {
+        +plot_comprehensive_metrics()
+        +plot_layer_heatmap()
+        +plot_trajectories()
+    }
+    
+    class AnalysisOrchestrator {
+        -LayerwiseSemanticDynamicsConfig config
+        -DataManager data_manager
+        -ComprehensiveEvaluator evaluator
+        -VisualizationEngine visualizer
+        +run_comprehensive_analysis()
+        -_generate_final_report()
+        -_save_results()
+    }
+    
+    ModelManager *-- HiddenStatesExtractor
+    ModelManager *-- TruthEncoder
+    ModelManager *-- ProjectionHead
+    AnalysisOrchestrator *-- DataManager
+    AnalysisOrchestrator *-- ComprehensiveEvaluator
+    AnalysisOrchestrator *-- VisualizationEngine
+    FeatureExtractor --> ModelManager
+    ComprehensiveEvaluator --> LayerwiseSemanticDynamicsConfig
 ```
-LLM Space                    Shared Space                Truth Space
-    │                             │                           │
-    │     ┌─────────────────┐     │     ┌─────────────────┐   │
-    │────▶│ Hidden Projector│────▶│◀────│ Truth Projector │◀──│
-    │     └─────────────────┘     │     └─────────────────┘   │
-    │                             │                           │
-    │         Now we can measure  │                           │
-    │         cosine similarity   │                           │
-    │         between them!       │                           │
-```
 
-**Why is this powerful?** Because we train these projectors to map semantically similar content to nearby points in the shared space.
+## 2.3 Data Flow Diagram
+
+```mermaid
+graph LR
+    subgraph "Input"
+        T[Text]
+        G[Ground Truth]
+        L[Label]
+    end
+    
+    subgraph "Processing Pipeline"
+        T --> HE[Hidden States Extractor]
+        G --> TE[Truth Encoder]
+        
+        HE --> HS[Hidden States<br/>[batch, layers, dim]]
+        TE --> TE2[Truth Embeddings<br/>[batch, truth_dim]]
+        
+        HS --> HP[Hidden Projection<br/>[batch, shared_dim]]
+        TE2 --> TP[Truth Projection<br/>[batch, shared_dim]]
+        
+        HP --> CS[Cosine Similarity<br/>[batch]]
+        TP --> CS
+    end
+    
+    subgraph "Output"
+        CS --> LOSS[Contrastive Loss]
+        CS --> AL[Alignment Scores]
+        AL --> FEAT[Trajectory Features]
+    end
+    
+    style T fill:#f9f
+    style G fill:#9ff
+    style LOSS fill:#ff9
+    style FEAT fill:#9f9
+```
 
 ---
 
-# PART 3: DEEP DIVE INTO KEY COMPONENTS
+# PART 3: COMPONENT DETAILS
 
 ## 3.1 HiddenStatesExtractor - The "Eyes" of the System
 
-### What It Does
-Extracts the internal representations (hidden states) from every layer of a language model.
+```mermaid
+graph TD
+    subgraph "HiddenStatesExtractor Internals"
+        Input[Text Input] --> Tokenizer[Tokenizer]
+        Tokenizer --> Tokens[Token IDs]
+        Tokens --> Model[Language Model]
+        
+        Model --> L1[Layer 1 Hidden]
+        Model --> L2[Layer 2 Hidden]
+        Model --> L3[...]
+        Model --> LN[Layer N Hidden]
+        
+        L1 --> MP1[Mean Pool]
+        L2 --> MP2[Mean Pool]
+        L3 --> MP3[Mean Pool]
+        LN --> MPN[Mean Pool]
+        
+        MP1 --> Stack[Stack All Layers]
+        MP2 --> Stack
+        MP3 --> Stack
+        MPN --> Stack
+        
+        Stack --> Output[[batch, layers, hidden_dim]]
+    end
+    
+    style Input fill:#f9f
+    style Output fill:#9f9
+    style Model fill:#ff9
+```
 
-### How It Works
+### Code Structure:
 ```python
 class HiddenStatesExtractor:
-    def get_hidden_states(self, texts):
-        # For each text, we get:
-        # - Input text: "The Earth orbits the Sun"
-        # - Output: Tensor of shape [layers, hidden_dimension]
-        #   where layers = number of model layers (e.g., 12 for GPT-2)
-        #   and hidden_dimension = size of each layer (e.g., 768)
+    """
+    Extracts hidden states from all layers of a language model.
+    """
+    
+    def __init__(self, model_name: str, device: str, max_length: int):
+        # Load model and tokenizer
+        # Initialize cache
+        pass
+    
+    def get_hidden_states(self, texts: List[str]) -> torch.Tensor:
+        """
+        Returns: Tensor of shape [batch_size, num_layers, hidden_size]
+        
+        Process:
+        1. Tokenize texts
+        2. Forward pass through model
+        3. Extract all layer hidden states
+        4. Mean pool each layer
+        5. Stack results
+        """
+        pass
 ```
-
-### Visual Understanding
-
-```
-Text: "The Earth orbits the Sun"
-       ↓
-Tokenizer → [101, 2054, 2567, 5892, 1012]  (token IDs)
-       ↓
-Embedding Layer → [batch, seq_len, 768]     (word embeddings)
-       ↓
-Layer 1 → [batch, seq_len, 768]             (first transformation)
-       ↓
-Layer 2 → [batch, seq_len, 768]             (deeper understanding)
-       ↓
-... (through all layers)
-       ↓
-Layer 12 → [batch, seq_len, 768]            (final representation)
-       ↓
-Mean Pooling → [batch, 768] per layer       (average across sequence)
-       ↓
-Stack → [batch, layers, 768]                 FINAL OUTPUT
-```
-
-### Why Mean Pooling?
-Instead of using all token representations (which vary in length), we average them:
-- Each token: "The" [0.1, 0.2, ...], "Earth" [0.3, 0.1, ...], "orbits" [0.2, 0.4, ...]
-- Mean: [(0.1+0.3+0.2)/3, (0.2+0.1+0.4)/3, ...]
-- Result: One vector representing the entire sentence
 
 ## 3.2 TruthEncoder - The "Oracle"
 
-### What It Does
-Encodes ground truth statements into embeddings that represent what factual information should look like.
-
-### Why Sentence Transformers?
-Sentence Transformers are specifically trained to create embeddings where semantically similar sentences are close together in vector space.
-
-### Example:
-```python
-truth_encoder.encode_batch(["Earth revolves around the Sun"])
-# Returns: [0.23, -0.56, 0.89, ...] (normalized embedding)
-
-truth_encoder.encode_batch(["Earth orbits the Sun"])  
-# Returns: [0.22, -0.55, 0.88, ...] (very similar!)
+```mermaid
+graph LR
+    subgraph "TruthEncoder Workflow"
+        T[Truth Statement] --> ST[Sentence Transformer]
+        ST --> E1[Raw Embedding<br/>[384] for MiniLM]
+        E1 --> Norm[L2 Normalization]
+        Norm --> E2[Normalized Embedding<br/>||v|| = 1]
+        
+        T2[Similar Truth] --> ST2[Sentence Transformer]
+        ST2 --> E12[Raw Embedding]
+        E12 --> Norm2[L2 Normalization]
+        Norm2 --> E22[Normalized Embedding]
+        
+        E2 --> CS{Cosine Similarity}
+        E22 --> CS
+        
+        CS --> SIM[Similarity Score<br/>Close to 1.0]
+    end
+    
+    style T fill:#f9f
+    style T2 fill:#9ff
+    style SIM fill:#9f9
 ```
 
 ## 3.3 Projection Heads - The "Translators"
 
-### Architecture Deep Dive
-
-```python
-def build_enhanced_projection_heads(hidden_dim, truth_dim, shared_dim):
-    # Hidden states projector (LLM → Shared Space)
-    hidden_proj = nn.Sequential(
-        # Layer 1: Expand dimensions
-        nn.Linear(hidden_dim, shared_dim * 4),  # e.g., 768 → 1024
-        nn.GELU(),  # Activation function (like ReLU but smoother)
-        nn.Dropout(0.2),  # Prevent overfitting
-        nn.LayerNorm(shared_dim * 4),  # Stabilize training
+```mermaid
+graph TD
+    subgraph "Hidden States Projector"
+        HIN[Input: 768 dim] --> L1[Linear: 768 → 1024]
+        L1 --> G1[GELU Activation]
+        G1 --> D1[Dropout 0.2]
+        D1 --> LN1[LayerNorm]
         
-        # Layer 2: Compress
-        nn.Linear(shared_dim * 4, shared_dim * 2),  # 1024 → 512
-        nn.GELU(),
-        nn.Dropout(0.1),
-        nn.LayerNorm(shared_dim * 2),
+        LN1 --> L2[Linear: 1024 → 512]
+        L2 --> G2[GELU]
+        G2 --> D2[Dropout 0.1]
+        D2 --> LN2[LayerNorm]
         
-        # Layer 3: Final projection
-        nn.Linear(shared_dim * 2, shared_dim),  # 512 → 256
-        nn.LayerNorm(shared_dim)
-    )
-```
-
-### Why This Architecture?
-1. **Expansion then compression** (like an autoencoder) helps learn better representations
-2. **GELU activation** handles negative values better than ReLU
-3. **LayerNorm** stabilizes training by normalizing activations
-4. **Dropout** prevents overfitting by randomly turning off neurons
-
-## 3.4 Contrastive Learning - The "Teaching Method"
-
-### The Core Training Concept
-
-We train the system using **contrastive learning** - teaching it to pull similar pairs together and push dissimilar pairs apart.
-
-```
-Training Data Format:
-[
-    ("text", "truth", "label"),
-    ("Earth orbits Sun", "Earth revolves around Sun", "factual"),      # Positive pair
-    ("Earth orbits Moon", "Earth revolves around Sun", "hallucination") # Negative pair
-]
-```
-
-### The Contrastive Loss Function
-
-```python
-def enhanced_contrastive_loss(cos_sim, labels, margin=0.5):
-    # Positive pairs (factual): want cos_sim close to 1
-    pos_loss = (1 - cos_sim[pos_mask]).pow(2).mean()
+        LN2 --> L3[Linear: 512 → 256]
+        L3 --> LN3[LayerNorm]
+        LN3 --> HOUT[Output: 256 dim]
+    end
     
-    # Negative pairs (hallucination): want cos_sim <= -margin
-    neg_loss = F.relu(cos_sim[neg_mask] + margin).pow(2).mean()
+    subgraph "Truth Projector"
+        TIN[Input: 384 dim] --> TL1[Linear: 384 → 1024]
+        TL1 --> TG1[GELU]
+        TG1 --> TD1[Dropout 0.2]
+        TD1 --> TLN1[LayerNorm]
+        
+        TLN1 --> TL2[Linear: 1024 → 512]
+        TL2 --> TG2[GELU]
+        TG2 --> TD2[Dropout 0.1]
+        TD2 --> TLN2[LayerNorm]
+        
+        TLN2 --> TL3[Linear: 512 → 256]
+        TL3 --> TLN3[LayerNorm]
+        TLN3 --> TOUT[Output: 256 dim]
+    end
     
-    return 0.5 * pos_loss + 0.5 * neg_loss
+    style HIN fill:#f9f
+    style TIN fill:#9ff
+    style HOUT fill:#9f9
+    style TOUT fill:#9f9
 ```
 
-### Visual Understanding of the Loss
+## 3.4 Contrastive Learning Architecture
 
-```
-BEFORE TRAINING:
-Positive pair similarity: 0.3 (too low)
-Negative pair similarity: 0.2 (too high - they're too close!)
-Loss: High
-
-AFTER TRAINING:
-Positive pair similarity: 0.9 ✓ (pulled together)
-Negative pair similarity: -0.6 ✓ (pushed apart)
-Loss: Low
-
-Goal: Maximize distance between classes in shared space
-```
-
----
-
-# PART 4: FEATURE ENGINEERING - What We Measure
-
-## 4.1 Trajectory Features Explained
-
-### The Alignment Trajectory
-
-For each sample, we get a sequence of alignment scores across layers:
-
-```
-Layer 1: 0.1  (barely aligned with truth)
-Layer 2: 0.3  (slightly better)
-Layer 3: 0.6  (getting there)
-Layer 4: 0.8  (good alignment)
-Layer 5: 0.85 (peak alignment)
-Layer 6: 0.82 (slight drop)
-... and so on
-```
-
-### Key Features We Extract
-
-#### 1. **Final Alignment** (last layer score)
-- **What it measures**: How aligned is the final output with truth?
-- **Intuition**: Factual statements should end with high alignment
-- **Range**: -1 to 1 (higher is better for factual)
-
-#### 2. **Mean Alignment** (average across layers)
-- **What it measures**: Overall consistency of alignment
-- **Intuition**: Factual statements maintain good alignment throughout
-- **Hallucinations**: May show low alignment from early layers
-
-#### 3. **Max Alignment** (peak score)
-- **What it measures**: Best alignment achieved at any layer
-- **Intuition**: Even if final output is good, when did it peak?
-- **Interesting pattern**: Hallucinations sometimes peak early then collapse
-
-#### 4. **Convergence Layer** (where max occurs)
-- **What it measures**: Which layer achieves highest alignment
-- **Intuition**: Factual info converges earlier and stabilizes
-- **Pattern**: Factual: Layer 3-4, Hallucination: Layer 5-6 (late peaks)
-
-#### 5. **Stability** (variance in last 3 layers)
-- **What it measures**: How stable is the representation at the end
-- **Intuition**: Factual info stabilizes, hallucinations oscillate
-- **Formula**: std(alignments[-3:]) (lower is more stable)
-
-#### 6. **Alignment Gain** (last - first layer)
-- **What it measures**: Improvement from start to finish
-- **Intuition**: How much did the representation evolve?
-- **Factual**: Usually positive gain, hallucinations may have negative
-
-#### 7. **Mean Velocity** (how fast representations change)
-- **What it measures**: Rate of change between layers
-- **Formula**: average of ||hidden_layer_{i+1} - hidden_layer_i||
-- **Intuition**: Hallucinations often show erratic velocity changes
-
-#### 8. **Mean Acceleration** (direction consistency)
-- **What it measures**: Are changes consistent or chaotic?
-- **Formula**: cosine similarity between consecutive deltas
-- **Pattern**: Factual: smooth acceleration, Hallucination: chaotic
-
-#### 9. **Oscillation Count** (direction changes)
-- **What it measures**: How many times does alignment direction flip?
-- **Intuition**: Hallucinations oscillate more (uncertainty)
-- **Example**: Increasing, then decreasing, then increasing = 2 oscillations
-
-## 4.2 Visualizing the Differences
-
-```
-FACTUAL STATEMENT TRAJECTORY:
-Alignment
-   1.0 |                    ~~~~~~ (stable plateau)
-   0.8 |                 ~~~
-   0.6 |              ~~~
-   0.4 |           ~~~
-   0.2 |        ~~~
-   0.0 |_____~~~__________________
-        L1  L2  L3  L4  L5  L6  L7  Layers
-        (Early convergence, stable)
-
-HALLUCINATION TRAJECTORY:
-Alignment
-   1.0 |
-   0.8 |           ~~~~ (unstable peak)
-   0.6 |        ~~~   ~~~
-   0.4 |     ~~~         ~~~
-   0.2 |  ~~~               ~~~
-   0.0 |_~~~___________________~~~
-        L1  L2  L3  L4  L5  L6  L7  Layers
-        (Late peaks, oscillations)
+```mermaid
+graph TD
+    subgraph "Training Batch"
+        B[Batch of 8 pairs] --> HP[Positive Pairs<br/>Factual]
+        B --> HN[Negative Pairs<br/>Hallucination]
+    end
+    
+    subgraph "Shared Space Projection"
+        HP --> HPP[Projected Hidden]
+        HP --> TPP[Projected Truth]
+        HN --> HPN[Projected Hidden]
+        HN --> TPN[Projected Truth]
+    end
+    
+    subgraph "Similarity Computation"
+        HPP --> CSP[Cosine Similarity<br/>Target: ~1.0]
+        TPP --> CSP
+        
+        HPN --> CSN[Cosine Similarity<br/>Target: ≤ -margin]
+        TPN --> CSN
+    end
+    
+    subgraph "Loss Calculation"
+        CSP --> POSLOSS[Positive Loss<br/>(1 - sim)²]
+        CSN --> NEGLOSS[Negative Loss<br/>ReLU(sim + margin)²]
+        
+        POSLOSS --> LOSS[Total Loss<br/>0.5*pos + 0.5*neg]
+        NEGLOSS --> LOSS
+    end
+    
+    style HP fill:#cfc
+    style HN fill:#fcc
+    style LOSS fill:#ff9
 ```
 
 ---
 
-# PART 5: TRAINING PROCESS - Step by Step
+# PART 4: TRAINING PROCESS
 
-## 5.1 Data Preparation
+## 4.1 Training Loop Sequence Diagram
 
-### Step 1: Collect Pairs
-```python
-pairs = [
-    ("Earth orbits Sun", "Earth revolves around Sun", "factual"),
-    ("Earth orbits Moon", "Earth revolves around Sun", "hallucination"),
-    # ... more pairs
-]
+```mermaid
+sequenceDiagram
+    participant D as DataLoader
+    participant E as Extractor
+    participant TE as TruthEncoder
+    participant H as HiddenProj
+    participant T as TruthProj
+    participant L as Loss
+    participant O as Optimizer
+    
+    loop Each Epoch
+        loop Each Batch
+            D->>E: texts
+            D->>TE: truths
+            D->>L: labels
+            
+            E->>E: forward pass
+            E-->>H: hidden states
+            
+            TE-->>T: truth embeddings
+            
+            H->>H: project to shared space
+            T->>T: project to shared space
+            
+            H-->>L: projected hidden
+            T-->>L: projected truth
+            
+            L->>L: compute cosine similarity
+            L->>L: compute contrastive loss
+            
+            L-->>O: loss value
+            O->>O: backward pass
+            O->>O: update weights
+        end
+        
+        O->>O: scheduler step
+        O-->>D: update learning rate
+    end
 ```
 
-### Step 2: Balance Classes
-```python
-# Count samples in each class
-factuals = [p for p in pairs if p[2] == "factual"]
-hallucinations = [p for p in pairs if p[2] == "hallucination"]
+## 4.2 Training State Machine
 
-# Take equal number from each
-min_count = min(len(factuals), len(hallucinations))
-balanced = factuals[:min_count] + hallucinations[:min_count]
-random.shuffle(balanced)
+```mermaid
+stateDiagram-v2
+    [*] --> Initialize
+    
+    Initialize --> LoadData
+    LoadData --> TrainEpoch
+    
+    state TrainEpoch {
+        [*] --> ForwardPass
+        ForwardPass --> LossCompute
+        LossCompute --> BackwardPass
+        BackwardPass --> WeightUpdate
+        WeightUpdate --> [*]
+    }
+    
+    TrainEpoch --> Validate
+    Validate --> CheckEarlyStop
+    
+    CheckEarlyStop --> TrainEpoch: loss improved
+    CheckEarlyStop --> SaveModel: best model
+    CheckEarlyStop --> StopTraining: patience exceeded
+    
+    SaveModel --> TrainEpoch
+    StopTraining --> [*]
 ```
 
-### Step 3: Create DataLoader
-```python
-dataset = TextPairDataset(balanced)
-dataloader = DataLoader(
-    dataset, 
-    batch_size=8,  # Process 8 pairs at once
-    shuffle=True   # Randomize order each epoch
-)
-```
+## 4.3 Gradient Flow Visualization
 
-## 5.2 Forward Pass - What Happens in One Batch
-
-### For each batch of 8 pairs:
-
-1. **Extract texts and truths**:
-```python
-texts = ["Earth orbits Sun", "Earth orbits Moon", ...]
-truths = ["Earth revolves around Sun", "Earth revolves around Sun", ...]
-labels = [1, 0, ...]  # 1 = factual, 0 = hallucination
-```
-
-2. **Get hidden states from LLM**:
-```python
-hidden_states = extractor.get_hidden_states(texts)
-# Shape: [8, 12, 768]  (batch=8, layers=12, dim=768)
-last_layer = hidden_states[:, -1, :]  # Take last layer
-# Shape: [8, 768]
-```
-
-3. **Get truth embeddings**:
-```python
-truth_embeddings = truth_encoder.encode_batch(truths)
-# Shape: [8, 384]  (MiniLM dimension)
-```
-
-4. **Project to shared space**:
-```python
-hidden_projected = hidden_proj(last_layer)        # [8, 256]
-truth_projected = truth_proj(truth_embeddings)    # [8, 256]
-
-# Normalize (important for cosine similarity)
-hidden_projected = F.normalize(hidden_projected, p=2, dim=-1)
-truth_projected = F.normalize(truth_projected, p=2, dim=-1)
-```
-
-5. **Compute similarities**:
-```python
-cos_sim = F.cosine_similarity(hidden_projected, truth_projected, dim=-1)
-# Returns: [0.9, -0.3, 0.8, 0.2, ...]  # 8 similarity scores
-```
-
-6. **Calculate loss**:
-```python
-loss = enhanced_contrastive_loss(cos_sim, labels)
-# Returns single number: e.g., 0.234
-```
-
-## 5.3 Backward Pass - Learning from Mistakes
-
-### How Gradient Descent Works
-
-Think of training like hiking down a mountain in fog:
-- **Loss** = how high you are (want to go down)
-- **Gradients** = which direction is downhill
-- **Learning rate** = how big a step to take
-
-```python
-# Step 1: Calculate gradients
-loss.backward()  # Computes how much each weight contributed to error
-
-# Step 2: Clip gradients (prevent explosion)
-torch.nn.utils.clip_grad_norm_(parameters, max_norm=1.0)
-
-# Step 3: Update weights
-optimizer.step()  # Move weights in direction that reduces loss
-
-# Step 4: Adjust learning rate
-scheduler.step()  # Gradually reduce learning rate over time
-```
-
-### Visualizing Weight Updates
-
-```
-BEFORE UPDATE:
-Weight = 0.5
-Gradient = +0.1 (increasing weight increases loss)
-Learning rate = 0.01
-New weight = 0.5 - 0.01*0.1 = 0.499
-
-AFTER UPDATE:
-Weight = 0.499 (slightly smaller)
-Loss should be slightly lower
-```
-
-## 5.4 Monitoring Training Progress
-
-### Key Metrics to Watch:
-
-1. **Training Loss**: Should decrease steadily
-2. **Validation Loss**: Should decrease (if it increases, overfitting)
-3. **Positive Similarity**: Should increase (factual pairs get closer)
-4. **Negative Similarity**: Should decrease (hallucinations pushed apart)
-5. **Validation Accuracy**: Should improve
-
-### Example Training Log:
-```
-Epoch 1: loss=0.856, pos_sim=0.32, neg_sim=0.28, val_acc=0.52
-Epoch 2: loss=0.621, pos_sim=0.48, neg_sim=0.15, val_acc=0.63
-Epoch 3: loss=0.453, pos_sim=0.62, neg_sim=0.02, val_acc=0.71
-Epoch 4: loss=0.321, pos_sim=0.74, neg_sim=-0.12, val_acc=0.78
-Epoch 5: loss=0.234, pos_sim=0.83, neg_sim=-0.24, val_acc=0.84
+```mermaid
+graph TD
+    subgraph "Forward Pass"
+        X[Input] --> L1[Layer 1]
+        L1 --> L2[Layer 2]
+        L2 --> L3[Layer 3]
+        L3 --> Y[Output]
+        Y --> L[Loss]
+    end
+    
+    subgraph "Backward Pass"
+        L --> dY[∂L/∂Y]
+        dY --> dL3[∂L/∂h3]
+        dL3 --> dL2[∂L/∂h2]
+        dL2 --> dL1[∂L/∂h1]
+        dL1 --> dX[∂L/∂X]
+    end
+    
+    subgraph "Weight Updates"
+        dL1 --> W1[Update W1: W1 - lr * ∂L/∂W1]
+        dL2 --> W2[Update W2: W2 - lr * ∂L/∂W2]
+        dL3 --> W3[Update W3: W3 - lr * ∂L/∂W3]
+    end
+    
+    style L fill:#f9f
+    style W1 fill:#9ff
+    style W2 fill:#9ff
+    style W3 fill:#9ff
 ```
 
 ---
 
-# PART 6: EVALUATION METHODS
+# PART 5: FEATURE ENGINEERING
 
-## 6.1 Supervised Evaluation
+## 5.1 Trajectory Feature Extraction
 
-### The Process
-
-1. **Extract features** from all samples (the 9 trajectory features)
-2. **Split data** into training and testing sets (80/20)
-3. **Train classifiers** on the features
-4. **Evaluate** on test set
-
-### Classifiers We Use:
-
-#### Logistic Regression
-- Simple but interpretable
-- Learns linear decision boundaries
-- Great baseline
-
-#### Random Forest
-- Ensemble of decision trees
-- Captures non-linear patterns
-- Robust to outliers
-
-#### Gradient Boosting
-- Sequential improvements
-- Often best performance
-- More prone to overfitting
-
-### Evaluation Metrics Explained
-
-#### Confusion Matrix Terms:
-```
-Actual\Predicted | Factual | Hallucination
------------------|---------|---------------
-Factual          |    TP   |      FN
-Hallucination    |    FP   |      TN
-
-TP = True Positives (correctly identified factual)
-TN = True Negatives (correctly identified hallucination)
-FP = False Positives (hallucination labeled as factual)
-FN = False Negatives (factual labeled as hallucination)
-```
-
-#### Key Metrics:
-
-1. **Accuracy** = (TP + TN) / (TP + TN + FP + FN)
-   - Overall correctness
-   - Problematic if classes are imbalanced
-
-2. **Precision** = TP / (TP + FP)
-   - When we say "factual", how often are we right?
-   - High precision = few false alarms
-
-3. **Recall** = TP / (TP + FN)
-   - What proportion of factuals did we catch?
-   - High recall = few missed factuals
-
-4. **F1 Score** = 2 * (Precision * Recall) / (Precision + Recall)
-   - Harmonic mean of precision and recall
-   - Balanced measure
-
-5. **Specificity** = TN / (TN + FP)
-   - What proportion of hallucinations did we catch?
-   - Important for safety-critical applications
-
-6. **AUC-ROC** (Area Under ROC Curve)
-   - Measures ability to distinguish between classes
-   - 1.0 = perfect, 0.5 = random
-   - Independent of classification threshold
-
-7. **MCC** (Matthews Correlation Coefficient)
-   - Correlation between predictions and actual
-   - Range: -1 to 1 (1 = perfect, 0 = random)
-   - Balanced even with class imbalance
-
-## 6.2 Unsupervised Evaluation
-
-### Why Unsupervised?
-Sometimes we don't have labeled data. We can still find patterns!
-
-### Clustering Approach
-
-```python
-# Extract features
-X = df[feature_columns].values
-
-# Scale features (important for clustering)
-scaler = StandardScaler()
-X_scaled = scaler.fit_transform(X)
-
-# K-means clustering (k=2 for factual vs hallucination)
-kmeans = KMeans(n_clusters=2)
-cluster_labels = kmeans.fit_predict(X_scaled)
-
-# Compare with true labels (if available)
-# Need to try both cluster mappings
-accuracy1 = accuracy_score(true_labels, cluster_labels)
-accuracy2 = accuracy_score(true_labels, 1 - cluster_labels)
-clustering_accuracy = max(accuracy1, accuracy2)
+```mermaid
+graph TD
+    subgraph "Layer-wise Alignment Sequence"
+        L1[Layer 1: 0.15] --> L2[Layer 2: 0.32]
+        L2 --> L3[Layer 3: 0.58]
+        L3 --> L4[Layer 4: 0.76]
+        L4 --> L5[Layer 5: 0.82]
+        L5 --> L6[Layer 6: 0.79]
+        L6 --> L7[Layer 7: 0.81]
+        L7 --> L8[Layer 8: 0.80]
+    end
+    
+    subgraph "Extracted Features"
+        F1[Final Alignment: 0.80]
+        F2[Mean Alignment: 0.63]
+        F3[Max Alignment: 0.82]
+        F4[Convergence Layer: 5]
+        F5[Stability: 0.015]
+        F6[Alignment Gain: 0.65]
+        F7[Mean Velocity: 0.23]
+        F8[Oscillations: 1]
+    end
+    
+    L8 --> F1
+    L1 --> F6
+    L1 --> F2
+    L2 --> F2
+    L3 --> F2
+    L4 --> F2
+    L5 --> F3
+    L5 --> F2
+    L5 --> F4
+    L6 --> F2
+    L6 --> F5
+    L7 --> F2
+    L7 --> F5
+    L8 --> F2
+    L8 --> F5
+    
+    style L8 fill:#9f9
+    style F1 fill:#f9f
 ```
 
-### Anomaly Detection
+## 5.2 Feature Relationships
 
-```python
-# Gaussian Mixture Model
-gmm = GaussianMixture(n_components=2)
-gmm.fit(X_scaled)
-
-# Get anomaly scores (lower = more anomalous)
-anomaly_scores = gmm.score_samples(X_scaled)
-
-# Factual samples should have higher scores (more "normal")
-# Hallucinations should have lower scores (anomalies)
+```mermaid
+graph LR
+    subgraph "Raw Data"
+        HS[Hidden States<br/>[layers, dim]]
+    end
+    
+    subgraph "Intermediate"
+        AL[Alignment Scores<br/>[layers]]
+        V[Velocities<br/>[layers-1]]
+        ACC[Accelerations<br/>[layers-2]]
+    end
+    
+    subgraph "Features"
+        FA[Final Alignment]
+        MA[Mean Alignment]
+        MXA[Max Alignment]
+        CL[Convergence Layer]
+        ST[Stability]
+        AG[Alignment Gain]
+        MV[Mean Velocity]
+        OC[Oscillation Count]
+    end
+    
+    HS --> AL
+    HS --> V
+    V --> ACC
+    
+    AL --> FA
+    AL --> MA
+    AL --> MXA
+    AL --> CL
+    AL --> ST
+    AL --> AG
+    AL --> OC
+    
+    V --> MV
+    
+    style HS fill:#f9f
+    style FA fill:#9f9
+    style MV fill:#9f9
 ```
 
-## 6.3 Hybrid Evaluation
+---
 
-Combines both approaches:
+# PART 6: EVALUATION PIPELINE
 
-```python
-hybrid_score = 0.7 * best_supervised_score + 0.3 * clustering_accuracy
+## 6.1 Evaluation Flow
+
+```mermaid
+graph TD
+    subgraph "Input"
+        F[Features DataFrame]
+        L[Labels]
+    end
+    
+    subgraph "Supervised Path"
+        F --> SPLIT[Train/Test Split]
+        SPLIT --> SCALE[StandardScaler]
+        SCALE --> LR[Logistic Regression]
+        SCALE --> RF[Random Forest]
+        SCALE --> GB[Gradient Boosting]
+        
+        LR --> MET[Compute Metrics]
+        RF --> MET
+        GB --> MET
+    end
+    
+    subgraph "Unsupervised Path"
+        F --> SCALE2[StandardScaler]
+        SCALE2 --> KM[K-Means<br/>Clustering]
+        SCALE2 --> GMM[Gaussian Mixture<br/>Anomaly Detection]
+        
+        KM --> CLUST[Cluster Labels]
+        GMM --> ANOM[Anomaly Scores]
+    end
+    
+    subgraph "Hybrid Path"
+        MET --> COMP[Composite Score]
+        CLUST --> COMP
+        COMP --> FINAL[Final Decision]
+    end
+    
+    style F fill:#f9f
+    style MET fill:#9ff
+    style COMP fill:#9f9
+    style FINAL fill:#f96
+```
+
+## 6.2 Metric Computation Diagram
+
+```mermaid
+graph TD
+    subgraph "Confusion Matrix"
+        TP[True Positives]
+        TN[True Negatives]
+        FP[False Positives]
+        FN[False Negatives]
+    end
+    
+    subgraph "Basic Metrics"
+        TP --> P[Precision = TP/(TP+FP)]
+        TN --> S[Specificity = TN/(TN+FP)]
+        TP --> R[Recall = TP/(TP+FN)]
+        
+        P --> F1[F1 = 2PR/(P+R)]
+        R --> F1
+    end
+    
+    subgraph "Advanced Metrics"
+        Y[True Labels] --> ROC[AUC-ROC]
+        YP[Predictions] --> ROC
+        
+        Y --> PR[AUC-PR]
+        YP --> PR
+        
+        TP --> MCC[MCC]
+        TN --> MCC
+        FP --> MCC
+        FN --> MCC
+        
+        Y --> K[Cohen's Kappa]
+        YP --> K
+    end
+    
+    style TP fill:#cfc
+    style TN fill:#cfc
+    style FP fill:#fcc
+    style FN fill:#fcc
+    style F1 fill:#ff9
+    style ROC fill:#9ff
 ```
 
 ---
 
 # PART 7: STATISTICAL ANALYSIS
 
-## 7.1 T-Tests - Are Differences Significant?
+## 7.1 Hypothesis Testing Flow
 
-### What is a T-test?
-Determines if the difference between two groups is statistically significant.
-
-### Example: Comparing final_alignment
-
-```python
-factual_alignments = [0.92, 0.88, 0.95, 0.89, 0.91]
-hallucination_alignments = [0.23, 0.31, 0.18, 0.42, 0.15]
-
-t_stat, p_value = ttest_ind(factual_alignments, hallucination_alignments)
+```mermaid
+graph TD
+    subgraph "Data Groups"
+        F[Factual Samples<br/>n1 samples]
+        H[Hallucination Samples<br/>n2 samples]
+    end
+    
+    subgraph "For Each Feature"
+        F --> TTest[T-Test]
+        H --> TTest
+        
+        TTest --> P[P-value]
+        TTest --> T[ T-statistic]
+        
+        P --> SIG{Significant?<br/>p < 0.05}
+    end
+    
+    subgraph "Effect Size"
+        F --> ES[Cohen's d]
+        H --> ES
+        
+        ES --> D[Effect Size<br/>d value]
+    end
+    
+    subgraph "Interpretation"
+        SIG -->|Yes| REJ[Reject Null<br/>Significant difference]
+        SIG -->|No| ACC[Accept Null<br/>No significant difference]
+        
+        D -->|d < 0.2| SM[Small Effect]
+        D -->|0.2 ≤ d < 0.5| MED[Medium Effect]
+        D -->|d ≥ 0.5| LG[Large Effect]
+    end
+    
+    style F fill:#cfc
+    style H fill:#fcc
+    style SIG fill:#ff9
+    style REJ fill:#9f9
+    style LG fill:#9ff
 ```
 
-### Interpreting P-values:
-- **p < 0.05**: Statistically significant (95% confidence)
-- **p < 0.01**: Highly significant (99% confidence)
-- **p > 0.05**: Not significant (difference could be by chance)
+## 7.2 Feature Distribution Analysis
 
-## 7.2 Effect Size - How Big is the Difference?
-
-### Cohen's d
-Measures the magnitude of difference, independent of sample size.
-
-```python
-def cohens_d(group1, group2):
-    diff = mean(group1) - mean(group2)
-    pooled_std = sqrt((std1^2 + std2^2) / 2)
-    return diff / pooled_std
-```
-
-### Interpreting Cohen's d:
-- **d = 0.2**: Small effect
-- **d = 0.5**: Medium effect  
-- **d = 0.8**: Large effect
-
-### Example Interpretation:
-```
-final_alignment:
-  - p-value: 0.000001 (highly significant)
-  - Cohen's d: 2.3 (very large effect)
-  - Conclusion: Strong evidence factual and hallucination differ
+```mermaid
+graph LR
+    subgraph "Feature: final_alignment"
+        F1[Factual<br/>Mean: 0.85<br/>Std: 0.12]
+        H1[Hallucination<br/>Mean: 0.21<br/>Std: 0.35]
+    end
+    
+    subgraph "Feature: stability"
+        F2[Factual<br/>Mean: 0.08<br/>Std: 0.03]
+        H2[Hallucination<br/>Mean: 0.42<br/>Std: 0.18]
+    end
+    
+    subgraph "Feature: convergence_layer"
+        F3[Factual<br/>Mean: 3.2<br/>Std: 1.1]
+        H3[Hallucination<br/>Mean: 6.8<br/>Std: 2.3]
+    end
+    
+    F1 --> COMP1{Comparison}
+    H1 --> COMP1
+    COMP1 --> RES1[P < 0.001<br/>d = 2.3]
+    
+    F2 --> COMP2
+    H2 --> COMP2
+    COMP2 --> RES2[P < 0.001<br/>d = 1.8]
+    
+    F3 --> COMP3
+    H3 --> COMP3
+    COMP3 --> RES3[P < 0.001<br/>d = 1.5]
+    
+    style F1 fill:#cfc
+    style H1 fill:#fcc
+    style RES1 fill:#9f9
 ```
 
 ---
 
-# PART 8: PRACTICAL USAGE GUIDE
+# PART 8: DEPLOYMENT ARCHITECTURE
 
-## 8.1 Installation and Setup
+## 8.1 Production System Design
 
-```bash
-# Clone or create project
-mkdir layerwise-semantic-dynamics
-cd layerwise-semantic-dynamics
-
-# Install dependencies
-pip install torch transformers sentence-transformers
-pip install datasets scikit-learn pandas numpy
-pip install matplotlib seaborn scipy tqdm
-```
-
-## 8.2 Quick Start - Running Your First Analysis
-
-```python
-# minimal_example.py
-from layerwise_semantic_dynamics import (
-    LayerwiseSemanticDynamicsConfig,
-    AnalysisOrchestrator,
-    OperationMode
-)
-
-# Create configuration
-config = LayerwiseSemanticDynamicsConfig(
-    model_name="gpt2",           # Which LLM to analyze
-    num_pairs=500,                # How many examples to use
-    epochs=10,                    # Training epochs
-    mode=OperationMode.HYBRID     # Evaluation mode
-)
-
-# Run analysis
-orchestrator = AnalysisOrchestrator(config)
-results = orchestrator.run_comprehensive_analysis()
-
-# Check results
-print(f"Best F1 Score: {results['key_findings']['best_f1_score']:.3f}")
-print(f"Detection Quality: {results['key_findings']['detection_quality']}")
-```
-
-## 8.3 Configuration Options Explained
-
-```python
-config = LayerwiseSemanticDynamicsConfig(
-    # Model settings
-    model_name="gpt2",  # or "gpt2-medium", "facebook/opt-125m", etc.
-    truth_encoder_name="sentence-transformers/all-MiniLM-L6-v2",
+```mermaid
+graph TB
+    subgraph "Client Layer"
+        API[API Gateway]
+        WEB[Web App]
+        MOB[Mobile App]
+    end
     
-    # Training parameters
-    batch_size=8,          # Higher = faster but more memory
-    epochs=30,             # More epochs = better until overfitting
-    learning_rate=5e-5,    # Too high = unstable, too low = slow
-    margin=0.5,            # Separation required for negative pairs
+    subgraph "Application Layer"
+        LB[Load Balancer]
+        
+        subgraph "Service Instances"
+            S1[Service Instance 1]
+            S2[Service Instance 2]
+            S3[Service Instance N]
+        end
+        
+        LB --> S1
+        LB --> S2
+        LB --> S3
+    end
     
-    # Data settings
-    num_pairs=1000,        # Total examples to use
-    datasets=["synthetic", "truthfulqa"],  # Data sources
+    subgraph "Model Layer"
+        S1 --> M1[Model 1]
+        S2 --> M2[Model 2]
+        S3 --> M3[Model N]
+        
+        M1 --> C1[Cache 1]
+        M2 --> C2[Cache 2]
+        M3 --> C3[Cache N]
+    end
     
-    # Operation mode
-    mode=OperationMode.HYBRID,  # SUPERVISED, UNSUPERVISED, or HYBRID
-    use_pretrained=False,       # Use previously trained models
+    subgraph "Data Layer"
+        C1 --> DB[(Results DB)]
+        C2 --> DB
+        C3 --> DB
+        
+        DB --> MON[Monitoring]
+    end
     
-    # Evaluation
-    metrics=['f1', 'auroc', 'precision', 'recall'],
-    confidence_threshold=0.7,    # Threshold for classification
-)
+    API --> LB
+    WEB --> API
+    MOB --> API
+    
+    style API fill:#f9f
+    style LB fill:#9ff
+    style DB fill:#ff9
+    style MON fill:#9f9
 ```
 
-## 8.4 Understanding the Output
+## 8.2 API Request Flow
 
-### Directory Structure After Running:
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant G as API Gateway
+    participant L as Load Balancer
+    participant S as Service
+    participant M as Model
+    participant D as Database
+    
+    C->>G: POST /detect
+    G->>L: Route request
+    L->>S: Forward to instance
+    
+    S->>S: Validate input
+    S->>M: Load model
+    
+    M->>M: Extract features
+    M->>M: Run inference
+    
+    M-->>S: Prediction result
+    
+    S->>D: Log prediction
+    D-->>S: Confirm
+    
+    S-->>L: Return response
+    L-->>G: Forward response
+    G-->>C: JSON result
+    
+    Note over C,G: Response time < 200ms
 ```
-layerwise_semantic_dynamics_system/
-├── models/
-│   ├── hidden_proj_best.pt     # Best hidden projector
-│   ├── truth_proj_best.pt      # Best truth projector
-│   └── hidden_proj_final.pt    # Final models
-├── plots/
-│   └── comprehensive_metrics.png  # Visualization
-├── results/
-│   ├── final_analysis_results.csv  # Raw features
-│   ├── evaluation_results.json     # Metrics
-│   ├── statistical_summary.json    # Stats tests
-│   └── final_report.json           # Complete report
-├── data/                          # Cached data
-├── cache/                         # Model cache
-└── execution.log                  # Detailed logs
+
+## 8.3 Monitoring Architecture
+
+```mermaid
+graph TD
+    subgraph "Data Sources"
+        API[API Logs]
+        MOD[Model Predictions]
+        SYS[System Metrics]
+    end
+    
+    subgraph "Collection"
+        API --> COL[Collector]
+        MOD --> COL
+        SYS --> COL
+        
+        COL --> TS[Time Series DB]
+        COL --> EL[Elasticsearch]
+    end
+    
+    subgraph "Analysis"
+        TS --> PRO[Prometheus]
+        EL --> KIB[Kibana]
+        
+        PRO --> AL[Alert Manager]
+        KIB --> DASH[Dashboards]
+    end
+    
+    subgraph "Actions"
+        AL --> EMAIL[Email Alert]
+        AL --> SLACK[Slack Notification]
+        AL --> PAGER[Pager Duty]
+        
+        DASH --> GRAF[Grafana]
+    end
+    
+    style API fill:#f9f
+    style TS fill:#9ff
+    style AL fill:#f96
+    style GRAF fill:#9f9
 ```
 
-### Key Files to Examine:
+---
 
-1. **final_report.json** - Start here for summary
-2. **comprehensive_metrics.png** - Visual overview
-3. **evaluation_results.json** - Detailed metrics
-4. **execution.log** - Training progress and errors
+# PART 9: COMPONENT INTERACTIONS
 
-## 8.5 Interpreting Results
+## 9.1 Complete System Interaction Diagram
 
-### Example Good Results:
+```mermaid
+graph TB
+    subgraph "Configuration"
+        C[Config Object]
+        CM[Directory Manager]
+        LG[Logger]
+    end
+    
+    subgraph "Data Management"
+        DM[Data Manager] --> DB[(Dataset)]
+        DB --> P1[Synthetic Data]
+        DB --> P2[TruthfulQA]
+        DB --> P3[Custom Data]
+    end
+    
+    subgraph "Model Management"
+        MM[Model Manager]
+        MM --> HE[Hidden Extractor]
+        MM --> TE[Truth Encoder]
+        MM --> HP[Hidden Projector]
+        MM --> TP[Truth Projector]
+    end
+    
+    subgraph "Training"
+        TR[Trainer] --> MM
+        TR --> DL[DataLoader]
+        TR --> OP[Optimizer]
+        TR --> SC[Scheduler]
+    end
+    
+    subgraph "Analysis"
+        FE[Feature Extractor] --> MM
+        SA[Statistical Analyzer] --> FE
+        EV[Evaluator] --> SA
+    end
+    
+    subgraph "Output"
+        EV --> VI[Visualizer]
+        EV --> RP[Report Generator]
+        VI --> PL[Plots]
+        RP --> RJ[Results JSON]
+    end
+    
+    C --> DM
+    C --> MM
+    C --> TR
+    C --> EV
+    
+    DM --> TR
+    TR --> EV
+    EV --> RP
+    
+    style C fill:#f9f
+    style MM fill:#9ff
+    style TR fill:#ff9
+    style EV fill:#9f9
+    style RP fill:#f96
+```
+
+## 9.2 State Transition Diagram
+
+```mermaid
+stateDiagram-v2
+    [*] --> Initializing
+    
+    Initializing --> LoadingData: Config loaded
+    LoadingData --> Training: Data ready
+    
+    Training --> ExtractingFeatures: Model trained
+    ExtractingFeatures --> StatisticalAnalysis: Features extracted
+    
+    StatisticalAnalysis --> Evaluating: Statistics computed
+    Evaluating --> Visualizing: Evaluation complete
+    
+    Visualizing --> GeneratingReport: Plots created
+    GeneratingReport --> [*]: Report saved
+    
+    Training --> EarlyStopping: No improvement
+    EarlyStopping --> ExtractingFeatures: Stop training
+    
+    Evaluating --> Retraining: Poor performance
+    Retraining --> Training: Adjust config
+```
+
+---
+
+# PART 10: DATA STRUCTURES
+
+## 10.1 Core Data Structures
+
+```mermaid
+classDiagram
+    class TextPair {
+        +str text
+        +str truth
+        +str label
+        +int idx
+        +to_dict()
+    }
+    
+    class Batch {
+        +List~TextPair~ pairs
+        +List~str~ texts
+        +List~str~ truths
+        +torch.Tensor labels
+        +to_device()
+    }
+    
+    class HiddenStates {
+        +torch.Tensor states
+        +int batch_size
+        +int num_layers
+        +int hidden_dim
+        +mean_pool()
+        +layer_at(idx)
+    }
+    
+    class TrajectoryFeatures {
+        +float final_alignment
+        +float mean_alignment
+        +float max_alignment
+        +int convergence_layer
+        +float stability
+        +float alignment_gain
+        +float mean_velocity
+        +float mean_acceleration
+        +int oscillation_count
+        +to_dict()
+        +to_array()
+    }
+    
+    class EvaluationMetrics {
+        +float precision
+        +float recall
+        +float f1
+        +float accuracy
+        +float auroc
+        +float prauc
+        +float mcc
+        +dict confusion_matrix
+        +to_json()
+    }
+    
+    Batch *-- TextPair
+    HiddenStates --> TrajectoryFeatures
+    TrajectoryFeatures --> EvaluationMetrics
+```
+
+## 10.2 JSON Schema
+
 ```json
 {
-  "key_findings": {
-    "best_composite_score": 0.94,
-    "best_f1_score": 0.92,
-    "detection_quality": "EXCELLENT",
-    "significant_metrics": 7
-  },
-  "recommendations": [
-    "✓ Ready for production deployment in critical applications",
-    "✓ Strong statistical foundation with multiple significant metrics",
-    "✓ Good sample size for reliable analysis"
-  ]
+  "final_report": {
+    "type": "object",
+    "properties": {
+      "execution_summary": {
+        "type": "object",
+        "properties": {
+          "timestamp": {"type": "string"},
+          "config": {"type": "object"},
+          "device": {"type": "string"},
+          "total_samples": {"type": "integer"}
+        }
+      },
+      "dataset_statistics": {
+        "type": "object",
+        "properties": {
+          "factual_samples": {"type": "integer"},
+          "hallucination_samples": {"type": "integer"},
+          "class_balance": {"type": "number"}
+        }
+      },
+      "evaluation_results": {
+        "type": "object",
+        "properties": {
+          "LogisticRegression": {"type": "object"},
+          "RandomForest": {"type": "object"},
+          "GradientBoosting": {"type": "object"}
+        }
+      },
+      "key_findings": {
+        "type": "object",
+        "properties": {
+          "best_method": {"type": "string"},
+          "best_composite_score": {"type": "number"},
+          "detection_quality": {"type": "string"},
+          "significant_metrics": {"type": "integer"}
+        }
+      },
+      "recommendations": {
+        "type": "array",
+        "items": {"type": "string"}
+      }
+    }
+  }
 }
 ```
 
-### Example Concerning Results:
-```json
-{
-  "key_findings": {
-    "best_composite_score": 0.68,
-    "best_f1_score": 0.65,
-    "detection_quality": "MODERATE",
-    "significant_metrics": 2
-  },
-  "recommendations": [
-    "⚠ Consider further optimization before production deployment",
-    "⚠ Limited statistical significance - consider more data",
-    "⚠ Small sample size - collect more data for robust results"
-  ]
-}
+---
+
+# PART 11: ALGORITHM FLOWCHARTS
+
+## 11.1 Contrastive Learning Algorithm
+
+```mermaid
+flowchart TD
+    Start([Start Training]) --> Init[Initialize Models]
+    Init --> Load[Load Batch]
+    
+    Load --> Extract[Extract Hidden States]
+    Extract --> Encode[Encode Truths]
+    
+    Encode --> Project[Project to Shared Space]
+    Project --> Norm[L2 Normalize]
+    
+    Norm --> Sim[Compute Cosine Similarity]
+    Sim --> Loss{Calculate Loss}
+    
+    Loss --> Pos[For Positive Pairs:<br/>Loss = (1 - sim)²]
+    Loss --> Neg[For Negative Pairs:<br/>Loss = ReLU(sim + margin)²]
+    
+    Pos --> Combine[Combine: 0.5*pos + 0.5*neg]
+    Neg --> Combine
+    
+    Combine --> Back[Backward Pass]
+    Back --> Update[Update Weights]
+    
+    Update --> More{More Batches?}
+    More -->|Yes| Load
+    More -->|No| Epoch[End Epoch]
+    
+    Epoch --> Val[Validate]
+    Val --> Stop{Stop Training?}
+    Stop -->|No| Load
+    Stop -->|Yes| End([End Training])
+```
+
+## 11.2 Feature Extraction Algorithm
+
+```mermaid
+flowchart TD
+    Start([Start Feature Extraction]) --> Get[Get Text and Truth]
+    
+    Get --> Extract[Extract All Layer Hidden States]
+    Extract --> Align[For each layer l:]
+    
+    Align --> Proj[Project layer l to shared space]
+    Proj --> Cos[Compute cos similarity with truth]
+    Cos --> Store[Store alignment a_l]
+    
+    Store --> Next{More Layers?}
+    Next -->|Yes| Align
+    Next -->|No| Seq[Got Alignment Sequence: [a1, a2, ..., aL]]
+    
+    Seq --> Final[Final = aL]
+    Seq --> Mean[Mean = average(all a)]
+    Seq --> Max[Max = max(all a)]
+    
+    Seq --> Conv[Convergence Layer = argmax(all a)]
+    Seq --> Gain[Gain = aL - a1]
+    
+    Seq --> Stable[Stability = std(aL-2, aL-1, aL)]
+    
+    Seq --> Vel[Compute velocities between layers]
+    Vel --> Acc[Compute accelerations]
+    
+    Seq --> Osc[Count oscillation points]
+    
+    Final --> Return[Return all features]
+    Mean --> Return
+    Max --> Return
+    Conv --> Return
+    Gain --> Return
+    Stable --> Return
+    Vel --> Return
+    Acc --> Return
+    Osc --> Return
+    
+    Return --> End([End])
+```
+
+## 11.3 Evaluation Algorithm
+
+```mermaid
+flowchart TD
+    Start([Start Evaluation]) --> Input[Input: Features X, Labels y]
+    
+    Input --> Split[Split: 80% train, 20% test]
+    Split --> Scale[Scale features: StandardScaler]
+    
+    Scale --> Train[Train multiple classifiers:]
+    
+    Train --> LR[Logistic Regression]
+    Train --> RF[Random Forest]
+    Train --> GB[Gradient Boosting]
+    
+    LR --> PredLR[Predict on test set]
+    RF --> PredRF[Predict on test set]
+    GB --> PredGB[Predict on test set]
+    
+    PredLR --> Comp[For each classifier:]
+    PredRF --> Comp
+    PredGB --> Comp
+    
+    Comp --> CM[Compute confusion matrix]
+    CM --> Basic[Basic metrics:<br/>Precision, Recall, F1, Accuracy]
+    
+    Basic --> Adv[Advanced metrics:<br/>AUC-ROC, AUC-PR, MCC, Kappa]
+    
+    Adv --> CV[Cross-validation]
+    CV --> CS[Composite score]
+    
+    CS --> Compare{Compare classifiers}
+    Compare --> Best[Select best]
+    Best --> End([Return results])
 ```
 
 ---
 
-# PART 9: ADVANCED TOPICS
+# PART 12: ERROR HANDLING FLOWS
 
-## 9.1 Customizing for Your Own Data
+## 12.1 Error Handling Hierarchy
 
-### Adding Custom Datasets
-
-```python
-# 1. Prepare your data in the right format
-my_pairs = [
-    ("Your text here", "Ground truth here", "factual"),
-    ("Another text", "Different truth", "hallucination"),
-    # ... more pairs
-]
-
-# 2. Extend DataManager or create custom loader
-class CustomDataManager(DataManager):
-    def load_my_dataset(self):
-        # Load your data from files, database, etc.
-        return my_pairs
-
-# 3. Use in configuration
-config.datasets = ["synthetic", "truthfulqa", "custom"]
-```
-
-### Data Format Requirements:
-- **Text**: The model output you want to analyze
-- **Truth**: The factual ground truth
-- **Label**: "factual" or "hallucination"
-
-## 9.2 Fine-tuning on Domain-Specific Data
-
-### Medical Domain Example:
-```python
-medical_pairs = [
-    ("Aspirin reduces fever", "Aspirin is an antipyretic medication", "factual"),
-    ("Aspirin cures cancer", "Aspirin is not a cancer treatment", "hallucination"),
-    # ... more medical pairs
-]
-
-# Train on mixed data
-all_pairs = synthetic_pairs + medical_pairs
-```
-
-## 9.3 Ensemble Methods for Better Performance
-
-### Combining Multiple Models:
-```python
-# Train multiple models with different seeds
-configs = [
-    LayerwiseSemanticDynamicsConfig(seed=42),
-    LayerwiseSemanticDynamicsConfig(seed=123),
-    LayerwiseSemanticDynamicsConfig(seed=456)
-]
-
-# Ensemble predictions
-all_predictions = []
-for config in configs:
-    orchestrator = AnalysisOrchestrator(config)
-    results = orchestrator.run_comprehensive_analysis()
-    predictions = results['predictions']
-    all_predictions.append(predictions)
-
-# Average or vote
-final_prediction = np.mean(all_predictions, axis=0)
-```
-
-## 9.4 Real-time Detection Integration
-
-### API Example:
-```python
-class HallucinationDetector:
-    def __init__(self, model_path="pretrained_models"):
-        self.model_manager = ModelManager.load(model_path)
-        self.feature_extractor = FeatureExtractor(self.model_manager)
+```mermaid
+graph TD
+    subgraph "Top Level"
+        Main[Main Function]
+        Main --> Try1[Try Block]
+        Try1 --> Catch1[Except Exception]
+        Catch1 --> Log1[Log Error]
+        Log1 --> Return1[Return Error Status]
+    end
     
-    def detect(self, text, ground_truth):
-        # Extract features
-        features = self.feature_extractor.extract_trajectory_features(
-            text, ground_truth
-        )
+    subgraph "Orchestrator Level"
+        OA[AnalysisOrchestrator.run]
+        OA --> Try2[Try Block]
+        Try2 --> Step1[Step 1: Build Dataset]
+        Step1 --> Catch2[Dataset Error]
+        Catch2 --> Log2[Log Error]
+        Log2 --> Return2[Return Error]
         
-        # Classify
-        is_factual = self.classifier.predict([features])[0]
-        confidence = self.classifier.predict_proba([features])[0]
-        
-        return {
-            'is_factual': bool(is_factual),
-            'confidence': float(confidence),
-            'features': features
-        }
-
-# Usage
-detector = HallucinationDetector()
-result = detector.detect(
-    "The Eiffel Tower is in Rome",
-    "The Eiffel Tower is in Paris"
-)
-print(f"Hallucination detected: {not result['is_factual']}")
-print(f"Confidence: {result['confidence']:.2f}")
+        Try2 --> Step2[Step 2: Train]
+        Step2 --> Catch3[Training Error]
+        Catch3 --> Log3[Log Warning]
+        Log3 --> Continue[Continue with pretrained?]
+    end
+    
+    subgraph "Model Level"
+        Model[ModelManager.initialize]
+        Model --> Try3[Try Load Pretrained]
+        Try3 --> Catch4[Load Failed]
+        Catch4 --> InitNew[Initialize New]
+        InitNew --> Try4[Try Forward Pass]
+        Try4 --> Catch5[Dimension Error]
+        Catch5 --> Fallback[Use Fallback Dimensions]
+    end
+    
+    Main --> OA
+    OA --> Model
 ```
 
-## 9.5 Troubleshooting Common Issues
+## 12.2 Recovery Mechanisms
 
-### Issue 1: Poor Performance
-```
-Symptoms: Low accuracy, random guessing
-Solutions:
-- Increase training data (num_pairs)
-- Adjust learning rate (try 1e-4 or 1e-5)
-- Increase epochs (watch for overfitting)
-- Check class balance
-```
-
-### Issue 2: Overfitting
-```
-Symptoms: Train loss decreases, val loss increases
-Solutions:
-- Increase dropout (0.2 → 0.3)
-- Add weight decay
-- Reduce model complexity
-- Get more training data
-```
-
-### Issue 3: Slow Training
-```
-Symptoms: Hours per epoch
-Solutions:
-- Reduce batch size (if memory limited)
-- Use smaller model (gpt2 instead of gpt2-large)
-- Cache hidden states (use_cache=True)
-- Reduce max_length (if texts are short)
-```
-
-### Issue 4: Out of Memory
-```
-Symptoms: CUDA out of memory error
-Solutions:
-- Reduce batch size (8 → 4 → 2 → 1)
-- Use gradient accumulation
-- Use CPU if GPU memory insufficient
-- Reduce max_length
+```mermaid
+flowchart TD
+    Start([Operation Fails]) --> Identify{Error Type}
+    
+    Identify -->|Data Error| Data[Data Error Handler]
+    Identify -->|Model Error| Model[Model Error Handler]
+    Identify -->|Memory Error| Mem[Memory Error Handler]
+    Identify -->|Training Error| Train[Training Error Handler]
+    
+    Data --> D1[Check data format]
+    D1 --> D2[Validate required fields]
+    D2 --> D3[Attempt data repair]
+    D3 --> D4{Repairable?}
+    D4 -->|Yes| Retry[Retry Operation]
+    D4 -->|No| Skip[Skip sample]
+    
+    Model --> M1[Try reloading model]
+    M1 --> M2[Reset to pretrained]
+    M2 --> M3[Initialize fresh]
+    M3 --> Retry
+    
+    Mem --> Mem1[Reduce batch size]
+    Mem1 --> Mem2[Clear cache]
+    Mem2 --> Mem3[Use CPU fallback]
+    Mem3 --> Retry
+    
+    Train --> T1[Reduce learning rate]
+    T1 --> T2[Increase patience]
+    T2 --> T3[Load checkpoint]
+    T3 --> Retry
+    
+    Skip --> Continue[Continue with next]
+    Retry --> Success{Success?}
+    Success -->|Yes| Continue
+    Success -->|No| Fail[Fail gracefully]
+    
+    Fail --> End([Return partial results])
+    Continue --> End
 ```
 
 ---
 
-# PART 10: THEORY DEEP DIVE
+# PART 13: DEPENDENCY GRAPH
 
-## 10.1 Why Does This Work? The Theoretical Foundation
+## 13.1 Module Dependencies
 
-### Information Flow in Neural Networks
-
-Think of each layer as a transformation:
-```
-Layer 1: f₁(x) = σ(W₁x + b₁)
-Layer 2: f₂(h₁) = σ(W₂h₁ + b₂)
-...
-Layer L: f_L(h_{L-1}) = σ(W_L h_{L-1} + b_L)
-```
-
-Where:
-- x = input embedding
-- h_i = hidden state at layer i
-- W_i = weights (learned parameters)
-- b_i = biases
-- σ = activation function (non-linearity)
-
-### The Manifold Hypothesis
-
-Neural networks learn to map inputs onto a **manifold** (a lower-dimensional surface) in the high-dimensional space. Factual information lies on a different manifold than hallucinations.
-
-```
-High-dimensional space (e.g., 768 dimensions)
-    │
-    ├── Factual Manifold (smooth, continuous)
-    │   ├── "Earth orbits Sun"
-    │   ├── "Earth revolves around Sun"
-    │   └── "The Earth travels around the Sun"
-    │
-    └── Hallucination Manifold (disconnected, sparse)
-        ├── "Earth orbits Moon"
-        ├── "Earth revolves around Mars"
-        └── "The Earth is flat"
-```
-
-### Trajectory Through Layers
-
-As information flows through layers, it moves along this manifold. The trajectory properties differ:
-
-**Factual Trajectory**:
-- Moves toward stable attractor states
-- Converges quickly
-- Shows smooth, monotonic improvement
-
-**Hallucination Trajectory**:
-- Wanders in unstable regions
-- May approach then leave attractors
-- Shows oscillatory behavior
-
-## 10.2 Mathematical Formulation
-
-### Layer-wise Alignment:
-For layer l, alignment a_l is:
-```
-a_l = cos(proj_hidden(h_l), proj_truth(t))
-     = (proj_hidden(h_l) · proj_truth(t)) / (||proj_hidden(h_l)|| ||proj_truth(t)||)
-```
-
-### Trajectory Feature Calculation:
-
-**Stability** (variance in last k layers):
-```
-S = Var(a_{L-k}, a_{L-k+1}, ..., a_L)
-```
-
-**Velocity** (rate of change):
-```
-v_l = ||h_{l+1} - h_l||_2
-```
-
-**Acceleration** (consistency of change):
-```
-α_l = cos(v_{l+1}, v_l)
-```
-
-**Oscillation Count**:
-```
-O = #{l | sign(a_{l+1} - a_l) ≠ sign(a_l - a_{l-1})}
-```
-
-## 10.3 Connection to Model Confidence
-
-There's a strong correlation between trajectory features and model confidence:
-
-```
-High Confidence → Early convergence, high stability
-Low Confidence → Late convergence, oscillations
-Hallucination → Pathological trajectories (unstable, oscillatory)
-```
-
-This suggests the model "knows" when it's hallucinating at intermediate layers, even if the final output is confident.
-
----
-
-# PART 11: APPLICATIONS AND USE CASES
-
-## 11.1 Content Moderation
-
-**Use Case**: Detect AI-generated misinformation
-
-```python
-def moderate_content(text, source_claims):
-    # Extract claims from text
-    claims = extract_claims(text)
+```mermaid
+graph TD
+    subgraph "External Dependencies"
+        T[torch]
+        TF[transformers]
+        ST[sentence-transformers]
+        SK[scikit-learn]
+        NP[numpy]
+        PD[pandas]
+        MP[matplotlib]
+        SN[seaborn]
+        DS[datasets]
+        SC[scipy]
+    end
     
-    # Check each claim against source
-    suspicious_claims = []
-    for claim in claims:
-        for source_claim in source_claims:
-            result = detector.detect(claim, source_claim)
-            if not result['is_factual'] and result['confidence'] > 0.8:
-                suspicious_claims.append(claim)
-    
-    return suspicious_claims
-```
-
-## 11.2 RAG System Validation
-
-**Use Case**: Verify retrieval-augmented generation outputs
-
-```python
-class RAGValidator:
-    def __init__(self, detector):
-        self.detector = detector
-    
-    def validate_response(self, query, response, retrieved_docs):
-        # Check response against each retrieved document
-        scores = []
-        for doc in retrieved_docs:
-            result = self.detector.detect(response, doc)
-            scores.append(result['confidence'])
+    subgraph "Core Modules"
+        C[Config]
+        DM[DirectoryManager]
+        LG[Logger]
         
-        # Average confidence across relevant docs
-        confidence = np.mean(scores)
+        HE[HiddenStatesExtractor]
+        TE[TruthEncoder]
+        PH[ProjectionHeads]
         
-        return {
-            'is_valid': confidence > 0.7,
-            'confidence': confidence,
-            'per_doc_scores': scores
-        }
+        MM[ModelManager]
+        DM2[DataManager]
+        
+        FE[FeatureExtractor]
+        SA[StatisticalAnalyzer]
+        EV[Evaluator]
+        
+        VI[VisualizationEngine]
+        OR[Orchestrator]
+    end
+    
+    T --> HE
+    T --> PH
+    T --> MM
+    
+    TF --> HE
+    
+    ST --> TE
+    
+    SK --> EV
+    SK --> SA
+    
+    NP --> FE
+    NP --> SA
+    
+    PD --> DM2
+    PD --> VI
+    
+    MP --> VI
+    SN --> VI
+    
+    DS --> DM2
+    
+    SC --> SA
+    
+    C --> MM
+    C --> DM2
+    C --> OR
+    
+    DM --> OR
+    
+    LG --> MM
+    LG --> OR
+    
+    HE --> MM
+    TE --> MM
+    PH --> MM
+    
+    MM --> FE
+    
+    DM2 --> OR
+    
+    FE --> SA
+    SA --> EV
+    EV --> VI
+    
+    OR --> VI
 ```
 
-## 11.3 Model Comparison
+## 13.2 Import Hierarchy
 
-**Use Case**: Compare different models' tendency to hallucinate
-
-```python
-models = ["gpt2", "gpt2-medium", "gpt2-large", "gpt2-xl"]
-hallucination_rates = []
-
-for model in models:
-    config.model_name = model
-    orchestrator = AnalysisOrchestrator(config)
-    results = orchestrator.run_comprehensive_analysis()
+```mermaid
+graph BT
+    subgraph "Level 1: Base"
+        A1[torch]
+        A2[numpy]
+        A3[pandas]
+    end
     
-    # Extract hallucination rate from results
-    rate = 1 - results['dataset_statistics']['class_balance']
-    hallucination_rates.append(rate)
-
-# Plot comparison
-plt.bar(models, hallucination_rates)
-plt.title("Hallucination Rate by Model Size")
-plt.show()
-```
-
-## 11.4 Training Data Quality Assessment
-
-**Use Case**: Identify potential hallucinations in training data
-
-```python
-def audit_training_data(dataset, detector):
-    issues = []
+    subgraph "Level 2: Utilities"
+        B1[pathlib]
+        B2[dataclasses]
+        B3[typing]
+        B4[enum]
+    end
     
-    for i, example in enumerate(dataset):
-        text = example['text']
-        target = example['target']
-        
-        result = detector.detect(text, target)
-        if not result['is_factual'] and result['confidence'] > 0.9:
-            issues.append({
-                'index': i,
-                'text': text,
-                'target': target,
-                'confidence': result['confidence']
-            })
+    subgraph "Level 3: ML Libraries"
+        C1[transformers]
+        C2[sentence-transformers]
+        C3[scikit-learn]
+    end
     
-    return issues
+    subgraph "Level 4: Visualization"
+        D1[matplotlib]
+        D2[seaborn]
+    end
+    
+    subgraph "Level 5: Custom Modules"
+        E1[config]
+        E2[data_manager]
+        E3[model_manager]
+        E4[feature_extractor]
+        E5[evaluator]
+        E6[visualizer]
+    end
+    
+    subgraph "Level 6: Orchestration"
+        F1[orchestrator]
+        F2[main]
+    end
+    
+    A1 --> C1
+    A2 --> C3
+    A3 --> E2
+    
+    B1 --> E1
+    B2 --> E1
+    B3 --> E1
+    
+    C1 --> E3
+    C2 --> E3
+    C3 --> E5
+    
+    D1 --> E6
+    D2 --> E6
+    
+    E1 --> E2
+    E1 --> E3
+    E1 --> E5
+    E1 --> F1
+    
+    E2 --> F1
+    E3 --> E4
+    E3 --> F1
+    E4 --> E5
+    E5 --> F1
+    E6 --> F1
+    
+    F1 --> F2
 ```
 
 ---
 
-# PART 12: PERFORMANCE OPTIMIZATION
+# PART 14: QUICK REFERENCE CARDS
 
-## 12.1 Speed Optimizations
+## 14.1 Configuration Card
 
-### Caching Hidden States
-```python
-# Enable caching
-extractor = HiddenStatesExtractor(
-    model_name="gpt2",
-    use_cache=True  # Cache repeated texts
-)
-
-# Clear cache when done
-extractor.clear_cache()
-```
-
-### Batch Processing
-```python
-# Process in batches for efficiency
-batch_size = 32
-for i in range(0, len(texts), batch_size):
-    batch_texts = texts[i:i+batch_size]
-    batch_truths = truths[i:i+batch_size]
-    features = extract_batch_features(batch_texts, batch_truths)
-```
-
-### Mixed Precision Training
-```python
-# Use FP16 for faster training
-with torch.cuda.amp.autocast():
-    hidden_states = extractor.get_hidden_states(texts)
-    loss = compute_loss(hidden_states, truths, labels)
-```
-
-## 12.2 Memory Optimizations
-
-### Gradient Accumulation
-```python
-# Simulate larger batch with limited memory
-accumulation_steps = 4
-optimizer.zero_grad()
-
-for i, batch in enumerate(dataloader):
-    loss = compute_loss(batch)
-    loss = loss / accumulation_steps  # Normalize
-    loss.backward()
+```mermaid
+mindmap
+  root((Configuration))
+    Model Settings
+      model_name: "gpt2"
+      truth_encoder: "all-MiniLM-L6-v2"
+      shared_dim: 256
+      max_length: 128
     
-    if (i + 1) % accumulation_steps == 0:
-        optimizer.step()
-        optimizer.zero_grad()
+    Training
+      batch_size: 8
+      epochs: 30
+      learning_rate: 5e-5
+      margin: 0.5
+      weight_decay: 1e-5
+    
+    Data
+      num_pairs: 1000
+      datasets: ["synthetic","truthfulqa"]
+      train_split: 0.8
+      cv_folds: 5
+    
+    Mode
+      operation: HYBRID
+      use_pretrained: false
+      enable_ensemble: true
 ```
 
-### Layer-wise Processing
-```python
-# Process one layer at a time to save memory
-all_alignments = []
-for layer_idx in range(num_layers):
-    layer_hidden = hidden_states[:, layer_idx, :]
-    alignment = compute_alignment(layer_hidden, truth_embedding)
-    all_alignments.append(alignment)
+## 14.2 Feature Card
+
+```mermaid
+mindmap
+  root((Features))
+    Alignment
+      final_alignment[-1 to 1]
+      mean_alignment[-1 to 1]
+      max_alignment[-1 to 1]
+      alignment_gain[-2 to 2]
+    
+    Convergence
+      convergence_layer[0 to L-1]
+      stability[0 to 2]
+    
+    Dynamics
+      mean_velocity[0 to ∞]
+      mean_acceleration[-1 to 1]
+      oscillation_count[0 to L-2]
 ```
 
-## 12.3 Accuracy Optimizations
+## 14.3 Metric Card
 
-### Ensemble Methods
-```python
-# Combine multiple models
-classifiers = [
-    LogisticRegression(),
-    RandomForestClassifier(n_estimators=100),
-    GradientBoostingClassifier()
-]
-
-predictions = []
-for clf in classifiers:
-    clf.fit(X_train, y_train)
-    pred = clf.predict_proba(X_test)[:, 1]
-    predictions.append(pred)
-
-# Average predictions
-ensemble_pred = np.mean(predictions, axis=0)
+```mermaid
+mindmap
+  root((Metrics))
+    Basic
+      precision[0-1]
+      recall[0-1]
+      f1[0-1]
+      accuracy[0-1]
+      specificity[0-1]
+    
+    Advanced
+      auroc[0-1]
+      prauc[0-1]
+      mcc[-1 to 1]
+      kappa[-1 to 1]
+    
+    Composite
+      composite_score[0-1]
 ```
 
-### Feature Selection
-```python
-# Identify most important features
-selector = SelectKBest(k=5)  # Keep top 5 features
-X_selected = selector.fit_transform(X, y)
+## 14.4 Directory Structure Card
 
-# Which features were selected?
-selected_features = feature_columns[selector.get_support()]
-print(f"Most important: {selected_features}")
+```mermaid
+mindmap
+  root((Project Root))
+    models/
+      hidden_proj_best.pt
+      truth_proj_best.pt
+      hidden_proj_final.pt
+    
+    plots/
+      comprehensive_metrics.png
+      layer_heatmap.png
+      trajectories.png
+    
+    results/
+      final_analysis_results.csv
+      evaluation_results.json
+      statistical_summary.json
+      final_report.json
+    
+    data/
+      cache/
+    
+    execution.log
 ```
 
 ---
 
-# PART 13: EXTENDING THE SYSTEM
+# PART 15: TROUBLESHOOTING FLOWCHARTS
 
-## 13.1 Adding New Features
+## 15.1 Performance Issue Diagnosis
 
-```python
-class EnhancedFeatureExtractor(FeatureExtractor):
-    def extract_additional_features(self, text, truth):
-        base_features = super().extract_trajectory_features(text, truth)
-        
-        # Add entropy-based features
-        entropy_features = self.compute_entropy_features(text, truth)
-        
-        # Add attention-based features (if available)
-        attention_features = self.compute_attention_features(text)
-        
-        return {**base_features, **entropy_features, **attention_features}
+```mermaid
+flowchart TD
+    Start([Poor Performance]) --> Q1{Accuracy < 0.7?}
     
-    def compute_entropy_features(self, text, truth):
-        # Calculate prediction entropy across layers
-        # Higher entropy = more uncertainty
-        return {
-            'final_entropy': entropy,
-            'entropy_trajectory': entropy_trajectory
-        }
+    Q1 -->|Yes| Q2{Training/Validation<br/>Loss gap large?}
+    Q2 -->|Yes| Overfit[Overfitting]
+    Q2 -->|No| Underfit[Underfitting]
+    
+    Overfit --> O1[Increase dropout]
+    O1 --> O2[Add weight decay]
+    O2 --> O3[Reduce model size]
+    O3 --> O4[Get more data]
+    
+    Underfit --> U1[Increase epochs]
+    U1 --> U2[Adjust learning rate]
+    U2 --> U3[Increase model size]
+    U3 --> U4[Check data quality]
+    
+    Q1 -->|No| Q3{Inconsistent<br/>across runs?}
+    Q3 -->|Yes| Unstable[Unstable Training]
+    Q3 -->|No| DataIssue[Data Issue]
+    
+    Unstable --> S1[Check gradient norms]
+    S1 --> S2[Reduce learning rate]
+    S2 --> S3[Add gradient clipping]
+    
+    DataIssue --> D1[Check class balance]
+    D1 --> D2[Validate labels]
+    D2 --> D3[Check for duplicates]
 ```
 
-## 13.2 Adding New Evaluation Metrics
+## 15.2 Error Diagnosis
 
-```python
-class ExtendedEvaluator(ComprehensiveEvaluator):
-    def compute_additional_metrics(self, y_true, y_pred, y_pred_proba):
-        base_metrics = super()._compute_comprehensive_metrics(
-            y_true, y_pred, y_pred_proba
-        )
-        
-        # Add Brier score
-        brier = np.mean((y_pred_proba - y_true) ** 2)
-        
-        # Add log loss
-        log_loss = -np.mean(
-            y_true * np.log(y_pred_proba + 1e-15) + 
-            (1 - y_true) * np.log(1 - y_pred_proba + 1e-15)
-        )
-        
-        base_metrics.update({
-            'brier_score': float(brier),
-            'log_loss': float(log_loss)
-        })
-        
-        return base_metrics
-```
-
-## 13.3 Adding Visualization Types
-
-```python
-class ExtendedVisualizer(VisualizationEngine):
-    def plot_layer_heatmap(self, layerwise_data):
-        """Plot heatmap of alignments across layers and samples"""
-        
-        # Prepare data
-        factual_trajs = np.array(layerwise_data['factual'])
-        hallucination_trajs = np.array(layerwise_data['hallucination'])
-        
-        # Create heatmap
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
-        
-        sns.heatmap(factual_trajs, ax=ax1, cmap='RdYlGn', 
-                   cbar_kws={'label': 'Alignment'})
-        ax1.set_title('Factual Samples Trajectories')
-        ax1.set_xlabel('Layer')
-        ax1.set_ylabel('Sample')
-        
-        sns.heatmap(hallucination_trajs, ax=ax2, cmap='RdYlGn',
-                   cbar_kws={'label': 'Alignment'})
-        ax2.set_title('Hallucination Samples Trajectories')
-        ax2.set_xlabel('Layer')
-        ax2.set_ylabel('Sample')
-        
-        plt.tight_layout()
-        plt.savefig(dir_manager.get_plot_path("layer_heatmap"))
-        plt.show()
+```mermaid
+flowchart TD
+    Start([Error Occurs]) --> Type{Error Type}
+    
+    Type -->|CUDA OOM| Mem[Memory Error]
+    Type -->|ImportError| Imp[Import Error]
+    Type -->|KeyError| Key[Key Error]
+    Type -->|ValueError| Val[Value Error]
+    
+    Mem --> M1[Reduce batch size]
+    M1 --> M2[Clear cache]
+    M2 --> M3[Use CPU]
+    
+    Imp --> I1[Check installation]
+    I1 --> I2[Verify dependencies]
+    I2 --> I3[Reinstall package]
+    
+    Key --> K1[Check data format]
+    K1 --> K2[Verify column names]
+    K2 --> K3[Update data loader]
+    
+    Val --> V1[Check input types]
+    V1 --> V2[Verify dimensions]
+    V2 --> V3[Add validation]
 ```
 
 ---
 
-# PART 14: DEPLOYMENT GUIDE
+# APPENDIX: GLOSSARY
 
-## 14.1 Model Export
-
-```python
-# Save trained models in deployment format
-def export_for_deployment(model_manager, output_dir):
-    # Save projection heads
-    torch.save(
-        model_manager.hidden_proj.state_dict(),
-        f"{output_dir}/hidden_proj.pt"
-    )
-    torch.save(
-        model_manager.truth_proj.state_dict(),
-        f"{output_dir}/truth_proj.pt"
-    )
-    
-    # Save feature scaler
-    joblib.dump(scaler, f"{output_dir}/scaler.pkl")
-    
-    # Save classifier
-    joblib.dump(classifier, f"{output_dir}/classifier.pkl")
-    
-    # Save config
-    with open(f"{output_dir}/config.json", 'w') as f:
-        json.dump(config.__dict__, f)
-```
-
-## 14.2 REST API Example
-
-```python
-# app.py
-from flask import Flask, request, jsonify
-import torch
-import joblib
-
-app = Flask(__name__)
-
-# Load models at startup
-classifier = joblib.load("models/classifier.pkl")
-scaler = joblib.load("models/scaler.pkl")
-model_manager = ModelManager.load("models/")
-
-@app.route('/detect', methods=['POST'])
-def detect_hallucination():
-    data = request.json
-    text = data['text']
-    truth = data['truth']
-    
-    # Extract features
-    features = feature_extractor.extract_trajectory_features(text, truth)
-    
-    # Scale and predict
-    features_scaled = scaler.transform([list(features.values())])
-    prediction = classifier.predict(features_scaled)[0]
-    confidence = classifier.predict_proba(features_scaled)[0].max()
-    
-    return jsonify({
-        'is_factual': bool(prediction),
-        'confidence': float(confidence),
-        'features': features
-    })
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
-```
-
-## 14.3 Performance Monitoring
-
-```python
-class DeploymentMonitor:
-    def __init__(self):
-        self.predictions = []
-        self.true_labels = []
-        self.latencies = []
-    
-    def log_prediction(self, text, truth, prediction, confidence, latency):
-        self.predictions.append({
-            'text': text,
-            'truth': truth,
-            'prediction': prediction,
-            'confidence': confidence,
-            'timestamp': datetime.now(),
-            'latency_ms': latency * 1000
-        })
-    
-    def get_stats(self):
-        if not self.predictions:
-            return {}
-        
-        df = pd.DataFrame(self.predictions)
-        
-        return {
-            'total_queries': len(df),
-            'avg_confidence': df['confidence'].mean(),
-            'avg_latency_ms': df['latency_ms'].mean(),
-            'p95_latency_ms': df['latency_ms'].quantile(0.95),
-            'factual_rate': df['prediction'].mean()
-        }
-    
-    def detect_drift(self, window_size=100):
-        """Detect if model performance is drifting"""
-        recent = self.predictions[-window_size:]
-        historical = self.predictions[:-window_size]
-        
-        if len(recent) < window_size or len(historical) < window_size:
-            return {'drift_detected': False, 'message': 'Insufficient data'}
-        
-        # Compare distributions
-        recent_conf = [p['confidence'] for p in recent]
-        hist_conf = [p['confidence'] for p in historical]
-        
-        t_stat, p_value = ttest_ind(recent_conf, hist_conf)
-        
-        return {
-            'drift_detected': p_value < 0.05,
-            'p_value': p_value,
-            'recent_mean': np.mean(recent_conf),
-            'historical_mean': np.mean(hist_conf)
-        }
-```
-
----
-
-# PART 15: TROUBLESHOOTING AND FAQ
-
-## 15.1 Common Issues and Solutions
-
-### Q1: Why is my accuracy stuck at 50%?
-**A**: This suggests random guessing. Check:
-- Data balance (should be ~50/50 factual/hallucination)
-- Learning rate (too high or too low)
-- Model capacity (projection heads too small)
-- Training epochs (need more iterations)
-
-### Q2: Why does validation loss increase while training loss decreases?
-**A**: This is overfitting. Solutions:
-- Increase dropout (0.2 → 0.3 or 0.4)
-- Add weight decay (1e-4 → 1e-3)
-- Reduce model complexity (smaller hidden dims)
-- Get more training data
-
-### Q3: Why are all predictions the same class?
-**A**: Class imbalance or model collapse. Check:
-- Class distribution in training data
-- Loss function weights (try weighted loss)
-- Threshold calibration
-
-### Q4: Why is training so slow?
-**A**: Several possibilities:
-- Batch size too large (reduce)
-- Model too large (try smaller variant)
-- max_length too high (reduce if texts are short)
-- Not using caching (enable use_cache=True)
-
-### Q5: Why do I get CUDA out of memory?
-**A**: Memory issues:
-- Reduce batch size
-- Use gradient accumulation
-- Process in CPU mode
-- Use model parallelism if available
-
-## 15.2 Debugging Tips
-
-### Enable Detailed Logging
-```python
-logger.level = "DEBUG"  # See all messages
-
-# Add custom debug points
-def debug_tensor(name, tensor):
-    print(f"{name}: shape={tensor.shape}, "
-          f"mean={tensor.mean():.3f}, "
-          f"std={tensor.std():.3f}")
-```
-
-### Check Gradient Flow
-```python
-# Monitor gradients during training
-total_norm = 0
-for p in model.parameters():
-    if p.grad is not None:
-        param_norm = p.grad.data.norm(2)
-        total_norm += param_norm.item() ** 2
-total_norm = total_norm ** 0.5
-print(f"Gradient norm: {total_norm:.4f}")
-```
-
-### Validate Data Pipeline
-```python
-# Test with single batch
-sample_batch = next(iter(train_loader))
-texts = [item['text'] for item in sample_batch]
-truths = [item['truth'] for item in sample_batch]
-labels = torch.tensor([item['label'] for item in sample_batch])
-
-# Forward pass
-hidden_states = extractor.get_hidden_states(texts)
-truth_emb = truth_encoder.encode_batch(truths)
-print(f"Hidden states shape: {hidden_states.shape}")
-print(f"Truth embeddings shape: {truth_emb.shape}")
-```
-
----
-
-# APPENDIX: QUICK REFERENCE
-
-## Key Parameters Summary
-
-| Parameter | Range | Default | Effect |
-|-----------|-------|---------|--------|
-| batch_size | 2-64 | 8 | Higher = faster but more memory |
-| learning_rate | 1e-6 to 1e-3 | 5e-5 | Higher = faster but unstable |
-| epochs | 5-100 | 30 | More = better until overfitting |
-| margin | 0.1-1.0 | 0.5 | Higher = stricter separation |
-| dropout | 0.0-0.5 | 0.2 | Higher = more regularization |
-| weight_decay | 0-1e-2 | 1e-5 | Higher = more regularization |
-
-## Feature Reference
-
-| Feature | Range | Interpretation |
-|---------|-------|----------------|
-| final_alignment | [-1, 1] | Higher = more factual |
-| mean_alignment | [-1, 1] | Higher = more factual |
-| max_alignment | [-1, 1] | Higher = more factual |
-| convergence_layer | [0, L-1] | Earlier = faster convergence |
-| stability | [0, 2] | Lower = more stable |
-| alignment_gain | [-2, 2] | Positive = improvement |
-| mean_velocity | [0, ∞) | Lower = smoother changes |
-| mean_acceleration | [-1, 1] | Higher = more consistent |
-| oscillation_count | [0, L-2] | Lower = more stable |
-
-## Metric Reference
-
-| Metric | Range | Perfect | Random |
-|--------|-------|---------|--------|
-| Accuracy | [0, 1] | 1.0 | 0.5 |
-| Precision | [0, 1] | 1.0 | 0.5 |
-| Recall | [0, 1] | 1.0 | 0.5 |
-| F1 | [0, 1] | 1.0 | 0.5 |
-| AUC-ROC | [0, 1] | 1.0 | 0.5 |
-| MCC | [-1, 1] | 1.0 | 0.0 |
-| Cohen's Kappa | [-1, 1] | 1.0 | 0.0 |
+| Term | Definition |
+|------|------------|
+| **Hidden State** | Internal representation at a specific layer of a neural network |
+| **Embedding** | Vector representation of text in a continuous space |
+| **Layer** | One transformation step in a neural network |
+| **Trajectory** | Sequence of hidden states through layers |
+| **Alignment** | Cosine similarity between projected hidden state and truth |
+| **Shared Space** | Common embedding space where different modalities can be compared |
+| **Contrastive Learning** | Training method that pulls similar pairs together and pushes dissimilar apart |
+| **Projection Head** | Neural network that maps embeddings to shared space |
+| **Mean Pooling** | Averaging token embeddings to get sentence embedding |
+| **Cosine Similarity** | Measure of angle between vectors, range [-1, 1] |
+| **Hallucination** | Model output that is factually incorrect but presented confidently |
+| **Factual** | Model output consistent with ground truth |
+| **Convergence** | Point where alignment stabilizes |
+| **Stability** | Variance in late-layer alignments |
+| **Velocity** | Rate of change between consecutive layers |
+| **Oscillation** | Reversal in alignment trend |
 
 ---
 
 # CONCLUSION
 
-Layer-wise Semantic Dynamics provides a powerful framework for detecting hallucinations in language models by analyzing how representations evolve through the network. This approach works because:
+This documentation provides a comprehensive understanding of Layer-wise Semantic Dynamics for hallucination detection. The system works because:
 
-1. **Factual information follows stable trajectories** through the layers, converging early to semantically meaningful representations
+1. **Information follows predictable paths** through neural network layers
+2. **Truthful and hallucinated information** create distinguishable trajectories
+3. **Multiple features** capture different aspects of these trajectories
+4. **Ensemble methods** provide robust classification
+5. **Statistical validation** ensures reliability
 
-2. **Hallucinations show pathological trajectories** - oscillating, converging late or not at all, and showing instability
-
-3. **The shared space projection** enables direct comparison between model outputs and ground truth, even when they use different vocabularies
-
-4. **Comprehensive feature extraction** captures multiple aspects of these trajectories, providing rich signals for classification
-
-5. **Multiple evaluation strategies** (supervised, unsupervised, hybrid) provide robustness and adaptability to different use cases
-
-The system is designed to be:
-- **Extensible** - add new features, models, or datasets
-- **Scalable** - from single examples to large batches
+The architecture is designed to be:
+- **Modular** - each component can be independently improved
+- **Scalable** - from research to production
 - **Interpretable** - understand why decisions are made
-- **Practical** - ready for real-world deployment
+- **Extensible** - add new features and models easily
 
-Whether you're building content moderation systems, validating RAG pipelines, or researching model behavior, this framework provides the tools you need to detect and understand hallucinations in language models.
+Whether you're a beginner learning about LLM internals or an expert deploying production systems, this framework provides the tools and understanding needed to detect and analyze hallucinations in language models.
